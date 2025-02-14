@@ -1,0 +1,12 @@
+/config/*.yaml
+!/config/default/*.yaml
+/data
+node_modules
+pnpm-lock.yaml
+/.idea
+/.vscode
+/.git
+/.DS_Store
+/.gitattributes
+/.gitmodules
+/.gitkeep
