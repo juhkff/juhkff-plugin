@@ -1,0 +1,28 @@
+{
+  "name": "juhkff-plugin",
+  "version": "1.0.0",
+  "author": "扎克芙芙",
+  "description": "TRSS-Yunzai插件",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "module": "index.js",
+  "main": "index.js",
+  "scripts": {},
+  "imports": {
+    "#juhkff.path": "./model/path.js",
+    "#juhkff.setting": "./model/setting.js",
+    "#juhkff.tools": "./utils/tools.js",
+    "#juhkff.lunar": "./utils/lunar.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "lunar-javascript": "^1.6.13",
+    "xmldom": "^0.6.0"
+  },
+  "keywords": [
+    "juhkff",
+    "扎克芙芙",
+    "综合",
+    "TRSS-Yunzai"
+  ]
+}
