@@ -3,10 +3,10 @@ import { config } from "../../config/index.js";
 import { HistorySimpleJMsg, ComplexJMsg, HistoryComplexJMsg, Request, RequestBody } from "../../types/index.js";
 import { ChatKits, ConfigKits, Objects } from "../../utils/kits.js";
 import { EMOTION_KEY } from "../constant.js";
-import { ChatAgent } from "./chatAgent.js";
+import { ApiKey, ChatAgent } from "./chatAgent.js";
 
 export class OpenAI extends ChatAgent {
-    constructor(apiKey: { name: string, apiKey: string, enabled: boolean }[], apiUrl: string | null = null) { super(apiKey, apiUrl); }
+    constructor(apiKey: ApiKey[], apiUrl: string | null = null) { super(apiKey, apiUrl); }
 
     static hasVisual = () => true;
 
@@ -15,96 +15,67 @@ export class OpenAI extends ChatAgent {
             "输入模型名称（请勿选择该项）": null
         };
     }
-    async chatRequest(groupId: number, model: string, input: string, historyMessages?: HistorySimpleJMsg[], useSystemRole?: boolean): Promise<any> {
-        let response: any;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            // 构造请求体
-            var request: Request = {
-                url: config.autoReply.apiCustomUrl,
-                options: {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${eachKey.apiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        model: model,
-                        messages: [],
-                        stream: false,
-                        temperature: 1.5,
-                    },
-                },
-            };
-            if (config.autoReply.useChatProxy) request.options.agent = this.proxy;
-            if (!this.modelsChat.hasOwnProperty(model) || this.modelsChat[model] === null) {
-                response = await this.commonRequestChat(groupId, request, input, historyMessages, useSystemRole);
-            } else {
-                response = await this.modelsChat[model](groupId, request, input, historyMessages, useSystemRole)
-            }
-            if (response && response.ok) return response.data;
-        }
-        if (this.apiKey.length > 0) return response?.error;
-    }
     async visualModels(): Promise<Record<string, { chat: Function; tool: Function; }> | undefined> {
         return {
             "输入视觉模型名称（请勿选择该项）": null
         }
     }
-    async visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<any> {
-        let response: any;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            let request: Request = {
-                url: config.autoReply.apiCustomUrl,
-                options: {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${eachKey.apiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        model: model,
-                        messages: [],
-                        stream: false,
-                    },
+
+    // --- 请求构建 ---
+
+    protected buildChatRequest(key: ApiKey, model: string): Request {
+        return {
+            url: this.apiUrl ? `${this.apiUrl}/chat/completions` : config.autoReply.apiCustomUrl,
+            options: {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${key.apiKey}`,
+                    "Content-Type": "application/json",
                 },
-            };
-            if (config.autoReply.useChatProxy) request.options.agent = this.proxy;
-            if (!this.modelsVisual.hasOwnProperty(model) || this.modelsVisual[model] === null) {
-                response = await this.commonRequestVisual(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
-            } else {
-                response = await this.modelsVisual[model].chat(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
-            }
-            if (response && response.ok) return response.data;
-        }
-        if (this.apiKey.length > 0) return response?.error;
+                body: {
+                    model: model,
+                    messages: [],
+                    stream: false,
+                    temperature: 1.5,
+                },
+            },
+        };
     }
-    async toolRequest(model: string, j_msg: { img?: string[]; text: string[]; }): Promise<any> {
-        let response: any;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            var request: Request = {
-                url: config.autoReply.visualApiCustomUrl,
-                options: {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${eachKey.apiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        model: model,
-                        messages: [],
-                        stream: false,
-                    },
+
+    protected buildVisualRequest(key: ApiKey, model: string): Request {
+        return {
+            url: this.apiUrl ? `${this.apiUrl}/chat/completions` : config.autoReply.apiCustomUrl,
+            options: {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${key.apiKey}`,
+                    "Content-Type": "application/json",
                 },
-            };
-            if (config.autoReply.useVisualProxy) request.options.agent = this.proxy;
-            if (!this.modelsVisual.hasOwnProperty(model) || this.modelsVisual[model] === null) {
-                response = await this.commonRequestTool(JSON.parse(JSON.stringify(request)), j_msg);
-            } else {
-                response = await this.modelsVisual[model].tool(JSON.parse(JSON.stringify(request)), j_msg);
-            }
-            if (response && response.ok) return response.data;
-        }
-        if (this.apiKey.length > 0) return response?.error;
+                body: {
+                    model: model,
+                    messages: [],
+                    stream: false,
+                },
+            },
+        };
+    }
+
+    protected buildToolRequest(key: ApiKey, model: string): Request {
+        return {
+            url: this.apiUrl ? `${this.apiUrl}/chat/completions` : config.autoReply.visualApiCustomUrl,
+            options: {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${key.apiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: {
+                    model: model,
+                    messages: [],
+                    stream: false,
+                },
+            },
+        };
     }
 
     //----------------------------------------- function -----------------------------------------
@@ -130,7 +101,6 @@ export class OpenAI extends ChatAgent {
                 : chatPrompt) as string
         };
     }
-
     protected async generateSystemContentVisual(groupId: number, useEmotion: boolean, chatPrompt: null | undefined | string): Promise<{ role?: "system", content: ({ type?: "text", text?: string } & Record<string, any>)[] }> {
         if (Objects.isNull(chatPrompt))
             chatPrompt =

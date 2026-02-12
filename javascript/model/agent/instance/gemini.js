@@ -15,36 +15,6 @@ export class Gemini extends ChatAgent {
             "输入其它模型（请勿选择该项）": null
         };
     }
-    async chatRequest(groupId, model, input, historyMessages, useSystemRole) {
-        let response;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            // 构造请求体
-            var request = {
-                url: `${this.apiUrl}/${model}:generateContent?key=${eachKey.apiKey}`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        contents: []
-                    },
-                },
-            };
-            if (config.autoReply.useChatProxy)
-                request.options.agent = this.proxy;
-            if (!this.modelsChat.hasOwnProperty(model) || this.modelsChat[model] === null) {
-                response = await this.commonRequestChat(groupId, request, input, historyMessages, useSystemRole);
-            }
-            else {
-                response = await this.modelsChat[model](groupId, request, input, historyMessages, useSystemRole);
-            }
-            if (response && response.ok)
-                return response.data;
-        }
-        if (this.apiKey.length > 0)
-            return response?.error;
-    }
     async visualModels() {
         return {
             "gemini-2.5-flash-preview-04-17": {
@@ -66,76 +36,28 @@ export class Gemini extends ChatAgent {
             "输入其它模型（请勿选择该项）": null
         };
     }
-    async visualRequest(groupId, model, nickName, j_msg, historyMessages, useSystemRole) {
-        /*
-        if (!this.modelsVisual[model]) {
-            logger.error("[Gemini]不支持的视觉模型：" + model);
-            return "[Gemini]不支持的视觉模型：" + model;
-        }
-        */
-        let response;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            let request = {
-                url: `${this.apiUrl}/${model}:generateContent?key=${eachKey.apiKey}`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        contents: []
-                    },
+    // --- 请求构建 ---
+    buildChatRequest(key, model) {
+        return {
+            url: `${this.apiUrl}/${model}:generateContent?key=${key.apiKey}`,
+            options: {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
                 },
-            };
-            if (config.autoReply.useChatProxy)
-                request.options.agent = this.proxy;
-            if (!this.modelsVisual.hasOwnProperty(model) || this.modelsVisual[model] === null) {
-                response = await this.commonRequestVisual(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
-            }
-            else {
-                response = await this.modelsVisual[model].chat(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
-            }
-            if (response.ok)
-                return response.data;
-        }
-        if (this.apiKey.length > 0)
-            return response?.error;
-    }
-    async toolRequest(model, j_msg) {
-        /*
-        if (!this.modelsVisual[model]) {
-            logger.error(`[Gemini]不支持的视觉模型: ${model}`);
-            return `[Gemini]不支持的视觉模型: ${model}`;
-        }
-        */
-        let response;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            var request = {
-                url: `${this.apiUrl}/${model}:generateContent?key=${eachKey.apiKey}`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        contents: []
-                    },
+                body: {
+                    contents: []
                 },
-            };
-            if (config.autoReply.useVisualProxy)
-                request.options.agent = this.proxy;
-            if (!this.modelsVisual.hasOwnProperty(model)) {
-                response = await this.commonRequestTool(JSON.parse(JSON.stringify(request)), j_msg);
-            }
-            else {
-                response = await this.modelsVisual[model].tool(JSON.parse(JSON.stringify(request)), j_msg);
-            }
-            if (response.ok)
-                return response.data;
-        }
-        if (this.apiKey.length > 0)
-            return response?.error;
+            },
+        };
     }
+    buildVisualRequest(key, model) {
+        return this.buildChatRequest(key, model);
+    }
+    buildToolRequest(key, model) {
+        return this.buildChatRequest(key, model);
+    }
+    //----------------------------------------- function -----------------------------------------
     async commonRequestChat(groupId, request, input, historyMessages = [], useSystemRole = true) {
         if (useSystemRole) {
             const promptName = ConfigKits.checkSpecificGroupPrompt(groupId, config.autoReply.chatPromptApply, config.autoReply.groupChatPromptApply);

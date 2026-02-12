@@ -3,10 +3,10 @@ import { config } from "../../../config/index.js";
 import { HistorySimpleJMsg, ComplexJMsg, HistoryComplexJMsg, Request, RequestBody } from "../../../types/index.js";
 import { ChatKits, ConfigKits, FileType, Objects } from "../../../utils/kits.js";
 import { EMOTION_KEY } from "../../constant.js";
-import { ChatAgent } from "../chatAgent.js";
+import { ApiKey, ChatAgent } from "../chatAgent.js";
 
 export class Gemini extends ChatAgent {
-    constructor(apiKey: { name: string, apiKey: string, enabled: boolean }[]) { super(apiKey, "https://generativelanguage.googleapis.com/v1beta/models"); }
+    constructor(apiKey: ApiKey[]) { super(apiKey, "https://generativelanguage.googleapis.com/v1beta/models"); }
     static hasVisual = () => true;
     async chatModels(): Promise<Record<string, Function> | undefined> {
         return {
@@ -16,32 +16,6 @@ export class Gemini extends ChatAgent {
             "gemini-2.0-flash": this.commonRequestChat.bind(this),
             "输入其它模型（请勿选择该项）": null
         };
-    }
-    async chatRequest(groupId: number, model: string, input: string, historyMessages?: HistorySimpleJMsg[], useSystemRole?: boolean): Promise<any> {
-        let response: any;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            // 构造请求体
-            var request: Request = {
-                url: `${this.apiUrl}/${model}:generateContent?key=${eachKey.apiKey}`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        contents: []
-                    } as RequestBody,
-                },
-            };
-            if (config.autoReply.useChatProxy) request.options.agent = this.proxy;
-            if (!this.modelsChat.hasOwnProperty(model) || this.modelsChat[model] === null) {
-                response = await this.commonRequestChat(groupId, request, input, historyMessages, useSystemRole);
-            } else {
-                response = await this.modelsChat[model](groupId, request, input, historyMessages, useSystemRole)
-            }
-            if (response && response.ok) return response.data;
-        }
-        if (this.apiKey.length > 0) return response?.error;
     }
     async visualModels(): Promise<Record<string, { chat: Function; tool: Function; }> | undefined> {
         return {
@@ -64,68 +38,33 @@ export class Gemini extends ChatAgent {
             "输入其它模型（请勿选择该项）": null
         };
     }
-    async visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<any> {
-        /*
-        if (!this.modelsVisual[model]) {
-            logger.error("[Gemini]不支持的视觉模型：" + model);
-            return "[Gemini]不支持的视觉模型：" + model;
-        }
-        */
-        let response: any;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            let request: Request = {
-                url: `${this.apiUrl}/${model}:generateContent?key=${eachKey.apiKey}`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        contents: []
-                    },
+
+    // --- 请求构建 ---
+
+    protected buildChatRequest(key: ApiKey, model: string): Request {
+        return {
+            url: `${this.apiUrl}/${model}:generateContent?key=${key.apiKey}`,
+            options: {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
                 },
-            };
-            if (config.autoReply.useChatProxy) request.options.agent = this.proxy;
-            if (!this.modelsVisual.hasOwnProperty(model) || this.modelsVisual[model] === null) {
-                response = await this.commonRequestVisual(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
-            } else {
-                response = await this.modelsVisual[model].chat(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
-            }
-            if (response.ok) return response.data;
-        }
-        if (this.apiKey.length > 0) return response?.error;
+                body: {
+                    contents: []
+                } as RequestBody,
+            },
+        };
     }
-    async toolRequest(model: string, j_msg: { img?: string[]; text: string[]; }): Promise<any> {
-        /*
-        if (!this.modelsVisual[model]) {
-            logger.error(`[Gemini]不支持的视觉模型: ${model}`);
-            return `[Gemini]不支持的视觉模型: ${model}`;
-        }
-        */
-        let response: any;
-        for (const eachKey of this.apiKey.filter((key) => key.enabled)) {
-            var request: Request = {
-                url: `${this.apiUrl}/${model}:generateContent?key=${eachKey.apiKey}`,
-                options: {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: {
-                        contents: []
-                    },
-                },
-            };
-            if (config.autoReply.useVisualProxy) request.options.agent = this.proxy;
-            if (!this.modelsVisual.hasOwnProperty(model)) {
-                response = await this.commonRequestTool(JSON.parse(JSON.stringify(request)), j_msg);
-            } else {
-                response = await this.modelsVisual[model].tool(JSON.parse(JSON.stringify(request)), j_msg);
-            }
-            if (response.ok) return response.data;
-        }
-        if (this.apiKey.length > 0) return response?.error;
+
+    protected buildVisualRequest(key: ApiKey, model: string): Request {
+        return this.buildChatRequest(key, model);
     }
+
+    protected buildToolRequest(key: ApiKey, model: string): Request {
+        return this.buildChatRequest(key, model);
+    }
+
+    //----------------------------------------- function -----------------------------------------
 
     protected async commonRequestChat(groupId: number, request: Request, input: string, historyMessages: HistorySimpleJMsg[] = [], useSystemRole = true) {
         if (useSystemRole) {
