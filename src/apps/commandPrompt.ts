@@ -1,6 +1,6 @@
 import { config } from "../config/index.js"
+import { ChatHistory } from "../db/index.js";
 import { agent } from "../model/map.js";
-import { HistorySimpleJMsg } from "../types/index.js";
 import { Objects } from "../utils/kits.js";
 
 // export const help = () => {
@@ -37,11 +37,12 @@ export class commandPrompt extends plugin {
         if (!command) return false;
         const reqText = command.prompt[Math.floor(Math.random() * command.prompt.length)].text;
         if (!agent.chat) return "请开启主动群聊并设置有效的AI接口";
-        const cmdMsg = [];
-        cmdMsg.push({ content: reqText, message_id: e.message_id, role: "system" });
+        const cmdMsg: ChatHistory[] = [];
+        cmdMsg.push(ChatHistory.build({ content: reqText, messageId: String(e.message_id), role: "assistant" }));
         const result = await agent.chat.chatRequest(e.group_id, config.autoReply.chatModel, null, cmdMsg, false);
-        cmdMsg.push({ role: "assistant", message_id: 0, content: result });
-        await e.reply(result);
+        if (!result.ok) return false;
+        cmdMsg.push(ChatHistory.build({ content: result.data, messageId: null, role: "assistant" }));
+        await e.reply(result.data);
         while (true) {
             const ue = await this.awaitContext(true, command.timeout) as E;
             if (typeof ue === "boolean" && ue === false) {
@@ -53,22 +54,23 @@ export class commandPrompt extends plugin {
             this.finish("resolveContext", true);
             const { msg: text } = ue;
             if (text === "#结束") break;
-            const history: HistorySimpleJMsg[] = [];
+            const history: ChatHistory[] = [];
             for (let i = 0; i < cmdMsg.length; i++)
-                history.push({ role: cmdMsg[i].role, message_id: cmdMsg[i].message_id, content: cmdMsg[i].content });
-            cmdMsg.push({ content: text, message_id: ue.message_id, role: "user" });
+                history.push(ChatHistory.build({ role: cmdMsg[i].role, messageId: cmdMsg[i].messageId, content: cmdMsg[i].content }));
+            cmdMsg.push(ChatHistory.build({ content: text, messageId: String(ue.message_id), role: "user" }));
             const result = await agent.chat.chatRequest(ue.group_id, config.autoReply.chatModel, text, history, false)
+            if (!result.ok) return false;
             if (!Objects.isNull(command.finishMsg)) {
                 const finishMsgList = command.finishMsg.split("|");
                 for (const each of finishMsgList) {
-                    if (result.includes(each.trim())) {
-                        await ue.reply(result);
+                    if (result.data.includes(each.trim())) {
+                        await ue.reply(result.data);
                         return true;
                     }
                 }
             }
-            cmdMsg.push({ content: result, message_id: 0, role: "assistant" });
-            await ue.reply(result);
+            cmdMsg.push(ChatHistory.build({ content: result.data, messageId: null, role: "assistant" }));
+            await ue.reply(result.data);
         }
         return true;
     }

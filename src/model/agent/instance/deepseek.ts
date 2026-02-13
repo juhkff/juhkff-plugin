@@ -3,6 +3,7 @@ import { config } from "../../../config/index.js";
 import { ComplexJMsg, HistoryComplexJMsg, Request, RequestBody } from "../../../types/index.js";
 import { OpenAI } from "../openaiAgent.js";
 import { ConfigKits } from "../../../utils/kits.js";
+import { ChatResponse } from "../chatAgent.js";
 
 export class DeepSeek extends OpenAI {
     constructor(apiKey: { name: string, apiKey: string, enabled: boolean }[]) { super(apiKey, "https://api.deepseek.com"); }
@@ -89,7 +90,7 @@ export class DeepSeek extends OpenAI {
     }
 
     // DeepSeek 不支持视觉模型
-    visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<any> {
+    visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<ChatResponse> {
         return undefined;
     }
     toolRequest(model: string, j_msg: { img?: string[], text: string[] }): Promise<any> {

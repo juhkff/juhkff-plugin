@@ -1,9 +1,10 @@
 import axios from "axios";
 import { config } from "../../config/index.js";
-import { HistorySimpleJMsg, ComplexJMsg, HistoryComplexJMsg, Request, RequestBody } from "../../types/index.js";
+import { ComplexJMsg, Request, RequestBody } from "../../types/index.js";
 import { ChatKits, ConfigKits, Objects } from "../../utils/kits.js";
 import { EMOTION_KEY } from "../constant.js";
-import { ApiKey, ChatAgent } from "./chatAgent.js";
+import { ApiKey, ChatAgent, ChatResponse } from "./chatAgent.js";
+import { ChatHistory } from "../../db/index.js";
 
 export class OpenAI extends ChatAgent {
     constructor(apiKey: ApiKey[], apiUrl: string | null = null) { super(apiKey, apiUrl); }
@@ -117,7 +118,7 @@ export class OpenAI extends ChatAgent {
             }],
         };
     }
-    protected async commonRequestChat(groupId: number, request: Request, input: string, historyMessages: HistorySimpleJMsg[] = [], useSystemRole = true) {
+    protected async commonRequestChat(groupId: number, request: Request, input: string, historyMessages: ChatHistory[] = [], useSystemRole = true): Promise<ChatResponse> {
         if (useSystemRole) {
             const promptName = ConfigKits.checkSpecificGroupPrompt(groupId, config.autoReply.chatPromptApply, config.autoReply.groupChatPromptApply);
             var systemContent = await this.generateSystemContent(groupId, config.autoReply.useEmotion, config.autoReply.chatPrompts.find(p => p.name == promptName)?.prompt);
@@ -127,9 +128,10 @@ export class OpenAI extends ChatAgent {
         if (historyMessages && historyMessages.length > 0) {
             historyMessages.forEach((msg) => {
                 // 不是图片时添加
-                // if (!msg.imageBase64) {
-                (request.options.body as RequestBody).messages.push({ role: msg.role, content: msg.content });
-                // }
+                (request.options.body as RequestBody).messages.push({
+                    role: msg.role,
+                    content: JSON.stringify(msg.toJSON())
+                });
             });
         }
         if (input != null)
@@ -157,7 +159,7 @@ export class OpenAI extends ChatAgent {
         }
     }
 
-    protected async commonRequestVisual(groupId: number, request: Request, nickeName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole: boolean = true) {
+    protected async commonRequestVisual(groupId: number, request: Request, nickeName: string, j_msg: ComplexJMsg, historyMessages?: ChatHistory[], useSystemRole: boolean = true): Promise<ChatResponse> {
         if (useSystemRole) {
             const promptName = ConfigKits.checkSpecificGroupPrompt(groupId, config.autoReply.chatPromptApply, config.autoReply.groupChatPromptApply);
             var systemContent = await this.generateSystemContentVisual(groupId, config.autoReply.useEmotion, config.autoReply.chatPrompts.find(p => p.name == promptName)?.prompt);
@@ -166,79 +168,12 @@ export class OpenAI extends ChatAgent {
         // 添加历史对话
         if (historyMessages && historyMessages.length > 0) {
             historyMessages.forEach((history) => {
-                var content = [];
-                var hasContent = false;
-                var msg = history.content;
-                if (!Objects.isNull(msg.sourceImg)) {
-                    for (const img of msg.sourceImg) {
-                        content.push({ type: "image_url", image_url: { detail: "auto", url: img } });
-                    }
-                    content.push({
-                        type: "text",
-                        text: "上述图片中可能包含装饰性图片/表情包（如无文字梗图、通用表情符号或纯娱乐性meme），此类视觉元素不携带实质性信息，在后续内容生成时应予以忽略"
-                    });
-                    hasContent = true;
-                }
-                if (!Objects.isNull(msg.img)) {
-                    for (const img of msg.img) {
-                        content.push({ type: "image_url", image_url: { detail: "auto", url: img } });
-                    }
-                    content.push({
-                        type: "text",
-                        text: "上述图片中可能包含装饰性图片/表情包（如无文字梗图、通用表情符号或纯娱乐性meme），此类视觉元素不携带实质性信息，在后续内容生成时应予以忽略",
-                    });
-                    hasContent = true;
-                }
-                // TODO 引用消息文本和消息正文拼接，不参与描述引用图片，先按这种逻辑实现试试
-                let finalMsg = "";
-                if (!Objects.isNull(msg.sourceText)) finalMsg += msg.sourceText;
-                if (!Objects.isNull(msg.text)) finalMsg += msg.text;
-                if (!Objects.isNull(finalMsg)) {
-                    // 如果只发图片会不记录发送人昵称，改为在最后额外发送一条json，指明发送人和时间
-                    content.push({ type: "text", text: finalMsg });
-                    hasContent = true;
-                }
-                // TODO 如果content只有notProcessed部分有内容，例如发送默认表情(type==face)情况，就直接跳过不加
-                if (hasContent) {
-                    // 在content头部插入
-                    if (history.role != "assistant") content.unshift({ type: "text", text: `${history.time} - ${history.nickName} 发送消息如下：` });
-                    (request.options.body as RequestBody).messages.push({ role: history.role, content: content });
-                }
-            });
-        }
-        // j_msg = {sourceImg: [], sourceText: "", img: [], text: "", notProcessed: []}
-        // 添加消息内容
-        let content = [];
-        if (!Objects.isNull(j_msg.sourceImg)) {
-            for (const img of j_msg.sourceImg) {
-                content.push({ type: "image_url", image_url: { detail: "auto", url: img } });
-            }
-            content.push({
-                type: "text",
-                text: "上述图片中可能包含装饰性图片/表情包（如无文字梗图、通用表情符号或纯娱乐性meme），此类视觉元素不携带实质性信息，在后续内容生成时应予以忽略",
-            });
-        }
-        if (!Objects.isNull(j_msg.img)) {
-            for (const img of j_msg.img) {
-                content.push({
-                    type: "image_url",
-                    image_url: { detail: "auto", url: img },
+                (request.options.body as RequestBody).messages.push({
+                    role: history.role,
+                    content: JSON.stringify(history.toJSON())
                 });
-            }
-            content.push({
-                type: "text",
-                text: "上述图片中可能包含装饰性图片/表情包（如无文字梗图、通用表情符号或纯娱乐性meme），此类视觉元素不携带实质性信息，在后续内容生成时应予以忽略",
             });
         }
-        // TODO 引用消息文本和消息正文拼接，不参与描述引用图片，先按这种逻辑实现试试
-        var finalMsg = j_msg.text;
-        if (!Objects.isNull(finalMsg) && !Objects.isNull(j_msg.sourceText))
-            finalMsg = j_msg.sourceText + finalMsg;
-        if (!Objects.isNull(finalMsg)) {
-            content.push({ type: "text", text: finalMsg });
-        }
-        if (content.length > 0) content.unshift({ type: "text", text: `${nickeName} 发送消息如下：` });
-
 
         (request.options.body as RequestBody).messages.push({ role: "user", content: content });
         if (config.autoReply.debugMode) {

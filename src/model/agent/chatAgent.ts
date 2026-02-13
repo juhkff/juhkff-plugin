@@ -5,18 +5,19 @@
  */
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../../config/index.js";
-import { ComplexJMsg, HistoryComplexJMsg, HistorySimpleJMsg, Request } from "../../types/index.js";
+import { ComplexJMsg, Request } from "../../types/index.js";
+import { ChatHistory } from "../../db/index.js";
 
 export type ApiKey = { name: string, apiKey: string, enabled: boolean };
 export type ChatResponse = { ok: boolean; data?: string; error?: string };
 
 export interface ChatInterface {
-    chatRequest(groupId: number, model: string, input: string, historyMessages?: HistorySimpleJMsg[], useSystemRole?: boolean): Promise<any>;
+    chatRequest(groupId: number, model: string, input: string, historyMessages?: ChatHistory[], useSystemRole?: boolean): Promise<ChatResponse>;
     chatModels(): Promise<Record<string, Function> | undefined>;
 }
 
 export interface VisualInterface {
-    visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<any>;
+    visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: ChatHistory[], useSystemRole?: boolean): Promise<any>;
     toolRequest(model: string, j_msg: { img?: string[], text: string[] }): Promise<any>;
     visualModels(): Promise<Record<string, { chat: Function, tool: Function }> | undefined>;
 }
@@ -53,8 +54,8 @@ export abstract class ChatAgent implements ChatInterface, VisualInterface {
 
     // --- 通用请求处理（子类实现格式相关逻辑） ---
 
-    protected abstract commonRequestChat(groupId: number, request: Request, input: string, historyMessages?: HistorySimpleJMsg[], useSystemRole?: boolean): Promise<ChatResponse>;
-    protected abstract commonRequestVisual(groupId: number, request: Request, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<ChatResponse>;
+    protected abstract commonRequestChat(groupId: number, request: Request, input: string, historyMessages?: ChatHistory[], useSystemRole?: boolean): Promise<ChatResponse>;
+    protected abstract commonRequestVisual(groupId: number, request: Request, nickName: string, j_msg: ComplexJMsg, historyMessages?: ChatHistory[], useSystemRole?: boolean): Promise<ChatResponse>;
     protected abstract commonRequestTool(request: Request, j_msg: { img?: string[], text: string[] }): Promise<ChatResponse>;
 
     /** 对chat响应数据进行后处理，子类可覆盖 */
@@ -62,7 +63,7 @@ export abstract class ChatAgent implements ChatInterface, VisualInterface {
 
     // --- 模板方法（封装Key遍历和请求分派逻辑） ---
 
-    async chatRequest(groupId: number, model: string, input: string, historyMessages?: HistorySimpleJMsg[], useSystemRole?: boolean): Promise<any> {
+    async chatRequest(groupId: number, model: string, input: string, historyMessages?: ChatHistory[], useSystemRole?: boolean): Promise<ChatResponse> {
         let response: ChatResponse;
         for (const eachKey of this.apiKey.filter(k => k.enabled)) {
             const request = this.buildChatRequest(eachKey, model);
@@ -74,12 +75,18 @@ export abstract class ChatAgent implements ChatInterface, VisualInterface {
                 response = await this.modelsChat[model](groupId, request, input, historyMessages, useSystemRole);
             }
 
-            if (response && response.ok) return this.postProcessChatResponse(response.data);
+            if (response && response.ok) {
+                response.data = this.postProcessChatResponse(response.data);
+                return response;
+            }
         }
-        if (this.apiKey.length > 0) return response?.error;
+        if (this.apiKey.length === 0) {
+            return { ok: false, error: "未设置有效的API密钥" };
+        }
+        return { ok: false, error: "请求失败" };
     }
 
-    async visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: HistoryComplexJMsg[], useSystemRole?: boolean): Promise<any> {
+    async visualRequest(groupId: number, model: string, nickName: string, j_msg: ComplexJMsg, historyMessages?: ChatHistory[], useSystemRole?: boolean): Promise<ChatResponse> {
         let response: ChatResponse;
         for (const eachKey of this.apiKey.filter(k => k.enabled)) {
             const request = this.buildVisualRequest(eachKey, model);
@@ -90,10 +97,12 @@ export abstract class ChatAgent implements ChatInterface, VisualInterface {
             } else {
                 response = await this.modelsVisual[model].chat(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
             }
-
-            if (response && response.ok) return response.data;
+            if (response && response.ok) return response;
         }
-        if (this.apiKey.length > 0) return response?.error;
+        if (this.apiKey.length === 0) {
+            return { ok: false, error: "未设置有效的API密钥" };
+        }
+        return { ok: false, error: "请求失败" };
     }
 
     async toolRequest(model: string, j_msg: { img?: string[], text: string[] }): Promise<any> {

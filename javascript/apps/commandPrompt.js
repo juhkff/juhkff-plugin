@@ -39,8 +39,10 @@ export class commandPrompt extends plugin {
         const cmdMsg = [];
         cmdMsg.push({ content: reqText, message_id: e.message_id, role: "system" });
         const result = await agent.chat.chatRequest(e.group_id, config.autoReply.chatModel, null, cmdMsg, false);
-        cmdMsg.push({ role: "assistant", message_id: 0, content: result });
-        await e.reply(result);
+        if (!result.ok)
+            return false;
+        cmdMsg.push({ role: "assistant", message_id: 0, content: result.data });
+        await e.reply(result.data);
         while (true) {
             const ue = await this.awaitContext(true, command.timeout);
             if (typeof ue === "boolean" && ue === false) {
@@ -58,17 +60,19 @@ export class commandPrompt extends plugin {
                 history.push({ role: cmdMsg[i].role, message_id: cmdMsg[i].message_id, content: cmdMsg[i].content });
             cmdMsg.push({ content: text, message_id: ue.message_id, role: "user" });
             const result = await agent.chat.chatRequest(ue.group_id, config.autoReply.chatModel, text, history, false);
+            if (!result.ok)
+                return false;
             if (!Objects.isNull(command.finishMsg)) {
                 const finishMsgList = command.finishMsg.split("|");
                 for (const each of finishMsgList) {
-                    if (result.includes(each.trim())) {
-                        await ue.reply(result);
+                    if (result.data.includes(each.trim())) {
+                        await ue.reply(result.data);
                         return true;
                     }
                 }
             }
-            cmdMsg.push({ content: result, message_id: 0, role: "assistant" });
-            await ue.reply(result);
+            cmdMsg.push({ content: result.data, message_id: 0, role: "assistant" });
+            await ue.reply(result.data);
         }
         return true;
     }

@@ -1,9 +1,9 @@
 import { changePrompt, ChatApiType } from "../config/define/autoReply.js";
 import { config } from "../config/index.js";
+import { ChatResponse } from "../model/agent/chatAgent.js";
 import { transformTextToVoice } from "../plugin/siliconflow.js";
-import { formatDateDetail } from "../utils/date.js";
-import { generateAnswer, parseAt, parseImage, parseJson, parseSourceMessage, parseUrl, saveContext } from "../utils/handle.js";
-import { generateAnswerVisual, parseImageVisual, parseJsonVisual, parseSourceMessageVisual, parseTextVisual, parseUrlVisual, saveContextVisual } from "../utils/handleVisual.js";
+import { generateAnswer, parseAt, parseImage, parseJson, parseUrl, saveContext } from "../utils/handle.js";
+import { generateAnswerVisual, parseImageVisual, parseJsonVisual, parseTextVisual, parseUrlVisual, saveContextVisual } from "../utils/handleVisual.js";
 import { ChatKits, Objects, Thread } from "../utils/kits.js";
 
 export const help = () => {
@@ -77,10 +77,10 @@ export class autoReply extends plugin {
         // 避免重复保存上下文
         // 借助siliconflow-plugin保存群聊上下文
         var time = Date.now();
-        let chatDate = formatDateDetail(time);
+        // let chatDate = formatDateDetail(time);
         await parseImage(e);
         // 处理引用消息，获取图片和文本
-        await parseSourceMessage(e);
+        // await parseSourceMessage(e);
         // 处理分享链接
         await parseJson(e);
         // 处理@信息
@@ -119,25 +119,24 @@ export class autoReply extends plugin {
             }
         }
 
-        var answer = undefined;
+        var answer: ChatResponse;
         var answer_time = undefined;
         // 如果@了bot，就直接回复
         if ((e.atBot && replyAtBot) || Math.random() < Number(chatRate)) {
             answer = await generateAnswer(e, msg);
-            if (!e.atBot && (Objects.isNull(answer))) {
+            if (!e.atBot && !answer.ok) {
                 // 如果自主发言失败不提示
             } else {
-                await this.handleReply(e, answer);
+                await this.handleReply(e, answer.data);
                 answer_time = Date.now();
             }
         }
         if (config.autoReply.useContext) {
-            // 保存用户消息
-            var content = chatDate + " - " + e.sender.card + "：" + msg;
-            await saveContext(time, e.group_id, e.message_id, "user", content);
+            // 保存用户消息;
+            await saveContext(time, e, "user", msg);
             // 保存AI回复
-            if (answer && !answer.startsWith("[autoReply]")) {
-                await saveContext(answer_time!, e.group_id, 0, "assistant", answer);
+            if (answer.ok) {
+                await saveContext(answer_time, e, "assistant", answer.data);
             }
         }
         return false;
@@ -151,10 +150,9 @@ export class autoReply extends plugin {
         // 避免重复保存上下文
         // 借助siliconflow-plugin保存群聊上下文
         var time = Date.now();
-        let chatDate = formatDateDetail(time);
         await parseImageVisual(e);
         // 处理引用消息，获取图片和文本
-        await parseSourceMessageVisual(e);
+        // await parseSourceMessageVisual(e);
         // 处理分享链接
         await parseJsonVisual(e);
         if (config.autoReply.attachUrlAnalysis) {
@@ -189,42 +187,24 @@ export class autoReply extends plugin {
             }
         }
 
-        var answer = undefined;
+        var answer: ChatResponse;
         var answer_time = undefined;
-        var answer_date = undefined;
         // 如果@了bot，就直接回复
         if ((e.atBot && replyAtBot) || Math.random() < Number(chatRate)) {
             answer = await generateAnswerVisual(e);
-            if (!e.atBot && (Objects.isNull(answer))) {
+            if (!e.atBot && !answer.ok) {
                 // 如果自主发言失败不提示
             } else {
-                await this.handleReply(e, answer);
+                await this.handleReply(e, answer.data);
                 answer_time = Date.now();
-                answer_date = formatDateDetail(answer_time);
             }
         }
         if (config.autoReply.useContext) {
             // 保存用户消息
-            await saveContextVisual(
-                time,
-                chatDate,
-                e.group_id,
-                e.message_id,
-                "user",
-                e.sender.card,
-                e.j_msg
-            );
+            await saveContextVisual(time, e, "user");
             // 保存AI回复
-            if (answer && !answer.startsWith("[autoReply]")) {
-                await saveContextVisual(
-                    answer_time!,
-                    answer_date,
-                    e.group_id,
-                    0,
-                    "assistant",
-                    "群BOT", // TODO 机器人的nickName，以后可以添加自定义名称的功能，现在该项暂时没用
-                    { text: answer }
-                );
+            if (answer.ok) {
+                await saveContextVisual(answer_time, e, "assistant");
             }
         }
         return false;
@@ -233,26 +213,26 @@ export class autoReply extends plugin {
     /**
      * 对已经生成的消息进行发送前处理
      * @param {*} e 
-     * @param {*} answer 
+     * @param {*} content 
      */
-    async handleReply(e: any, answer: string) {
+    async handleReply(e: any, content: string) {
         // 插件功能联动相关
-        const voiceBase64 = await transformTextToVoice(e, answer);
+        const voiceBase64 = await transformTextToVoice(e, content);
         if (!Objects.isNull(voiceBase64)) {
-            logger.info("[autoReply]语音生成成功，文字内容: " + answer);
+            logger.info("[autoReply]语音生成成功，文字内容: " + content);
             await e.reply(segment.record(`base64://${voiceBase64}`));
             return;
         }
         // 如果为连续短句，概率间隔发送，感觉这样更真实一点
-        if (answer.split(" ").length > 1 && answer.split(" ").length < 4 && Math.random() < 0.5) {
-            var answerList = answer.split(" ");
-            for (var i = 0; i < answerList.length; i++) {
-                var each = answerList[i];
+        if (content.split(" ").length > 1 && content.split(" ").length < 4 && Math.random() < 0.5) {
+            var contentList = content.split(" ");
+            for (var i = 0; i < contentList.length; i++) {
+                var each = contentList[i];
                 await e.reply(each);
                 await Thread.sleep((-0.5 + Math.random()) * 2 * 1000 * 4 + 5000);  // 随机延迟，范围(1s,9s)
             }
             return;
         }
-        await e.reply(answer);
+        await e.reply(content);
     }
 }

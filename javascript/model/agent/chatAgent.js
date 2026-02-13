@@ -30,11 +30,15 @@ export class ChatAgent {
             else {
                 response = await this.modelsChat[model](groupId, request, input, historyMessages, useSystemRole);
             }
-            if (response && response.ok)
-                return this.postProcessChatResponse(response.data);
+            if (response && response.ok) {
+                response.data = this.postProcessChatResponse(response.data);
+                return response;
+            }
         }
-        if (this.apiKey.length > 0)
-            return response?.error;
+        if (this.apiKey.length === 0) {
+            return { ok: false, error: "未设置有效的API密钥" };
+        }
+        return { ok: false, error: "请求失败" };
     }
     async visualRequest(groupId, model, nickName, j_msg, historyMessages, useSystemRole) {
         let response;
@@ -49,10 +53,12 @@ export class ChatAgent {
                 response = await this.modelsVisual[model].chat(groupId, JSON.parse(JSON.stringify(request)), nickName, j_msg, historyMessages, useSystemRole);
             }
             if (response && response.ok)
-                return response.data;
+                return response;
         }
-        if (this.apiKey.length > 0)
-            return response?.error;
+        if (this.apiKey.length === 0) {
+            return { ok: false, error: "未设置有效的API密钥" };
+        }
+        return { ok: false, error: "请求失败" };
     }
     async toolRequest(model, j_msg) {
         let response;

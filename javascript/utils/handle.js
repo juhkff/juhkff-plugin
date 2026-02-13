@@ -9,7 +9,8 @@ import { agent } from "../model/map.js";
 import { formatDateDetail } from "./date.js";
 import { analyseImage, extractUrlContent } from "./helper.js";
 import { Objects } from "./kits.js";
-import { getSourceMessage } from "./redis.js";
+import { getSourceMessage } from "./message_history.js";
+import { ChatHistory } from "../db/models/chat_history.js";
 /**
  * 由于会生成插件专属消息处理列表j_msg，该方法必须作为消息处理的第一个函数
  * @param {} e
@@ -52,10 +53,10 @@ export async function parseSourceMessage(e) {
         return;
     for (let i = 0; i < e.j_msg.length; i++) {
         if (e.j_msg[i].type === "reply") {
-            // 优先从redis中获取引用消息
-            var redis_source = await getSourceMessage(e.group_id, e.j_msg[i].id);
-            if (redis_source != undefined) {
-                var msg = `[回复 ${redis_source}]`;
+            // 从db中获取引用消息
+            var db_source = await getSourceMessage(e.group_id, e.j_msg[i].id);
+            if (db_source != undefined) {
+                var msg = `[回复 ${db_source}]`;
                 e.j_msg[i] = { text: msg, type: "reply" };
                 continue;
             }
@@ -206,9 +207,11 @@ export async function parseUrl(e) {
                         logger.info(`[URL处理]成功提取URL内容`);
                         // 借助chatApi对提取的内容进行总结
                         var model = config.autoReply.chatModel;
-                        var result = await agent.chat.chatRequest(e.group_id, model, "根据从URL抓取的信息，以自然语言简练地总结URL中的主要内容，其中无关信息可以过滤掉", [{ role: "user", content: extractResult.content }], false);
-                        e.j_msg[i].text = e.j_msg[i].text.replace(url, `<分享URL，URL内容的分析结果——${result}>`);
-                        e.j_msg[i].type = "url2text";
+                        const response = await agent.chat.chatRequest(e.group_id, model, "根据从URL抓取的信息，以自然语言简练地总结URL中的主要内容，其中无关信息可以过滤掉", [{ role: "user", content: extractResult.content }], false);
+                        if (response.ok) {
+                            e.j_msg[i].text = e.j_msg[i].text.replace(url, `<分享URL，URL内容的分析结果——${response.data}>`);
+                            e.j_msg[i].type = "url2text";
+                        }
                     }
                 }
             }
@@ -253,11 +256,11 @@ export async function generateAnswer(e, msg) {
     let model = config.autoReply.chatModel;
     if (!apiKey || apiKey.length == 0) {
         logger.error("[handle]请先设置chatApiKey");
-        return "[handle]请先设置chatApiKey";
+        return { ok: false, error: "[handle]请先设置chatApiKey" };
     }
     if (!model || model == "") {
         logger.error("[handle]请先设置chatModel");
-        return "[handle]请先设置chatModel";
+        return { ok: false, error: "[handle]请先设置chatModel" };
     }
     // 获取历史对话
     let historyMessages = [];
@@ -267,12 +270,17 @@ export async function generateAnswer(e, msg) {
     }
     // 如果启用了情感，并且redis中不存在情感，则进行情感生成
     if (config.autoReply.useEmotion && Objects.isNull(await redis.get(EMOTION_KEY))) {
-        redis.set(EMOTION_KEY, await emotionGenerate(), { EX: 24 * 60 * 60 });
+        const emotion = await emotionGenerate();
+        if (emotion.ok) {
+            redis.set(EMOTION_KEY, emotion.data, { EX: 24 * 60 * 60 });
+        }
     }
-    let answer = await sendChatRequest(e.group_id, e.sender.card + "：" + msg, model, historyMessages);
-    // 使用正则表达式去掉字符串 answer 头尾的换行符
-    answer = answer.replace(/^\n+|\n+$/g, "");
-    return answer;
+    const response = await sendChatRequest(e.group_id, e.sender.card + "：" + msg, model, historyMessages);
+    if (response.ok) {
+        // 使用正则表达式去掉字符串 content 头尾的换行符
+        response.data = response.data?.replace(/^\n+|\n+$/g, "");
+    }
+    return response;
 }
 /**
  * 发送ChatApi请求
@@ -284,34 +292,40 @@ export async function generateAnswer(e, msg) {
  */
 export async function sendChatRequest(groupId, input, model = "", historyMessages = [], useSystemRole = true) {
     if (!agent.chat)
-        return "[handle]请设置有效的AI接口";
-    var result = await agent.chat.chatRequest(groupId, model, input, historyMessages, useSystemRole);
-    return result;
+        return { ok: false, error: "[handle]请设置有效的AI接口" };
+    const response = await agent.chat.chatRequest(groupId, model, input, historyMessages, useSystemRole);
+    return response;
 }
 // 保存对话上下文
-export async function saveContext(time, groupId, message_id, role, message) {
+export async function saveContext(sendTime, e, role, message) {
     try {
         const maxHistory = config.autoReply.maxHistoryLength;
-        const key = `juhkff:auto_reply:${groupId}:${time}`;
-        // message_id = 0时，表示是AI回复
-        var saveContent = {
-            message_id: message_id,
+        // 保存新消息
+        await ChatHistory.create({
+            groupId: String(e.group_id),
+            messageId: role === "assistant" ? null : String(e.message_id),
             role: role,
+            userId: role === "assistant" ? null : String(e.user_id),
+            nickName: role === "assistant" ? null : e.sender.card,
             content: message,
-        };
-        await redis.set(key, JSON.stringify(saveContent), { EX: 12 * 60 * 60 }); // 12小时过期
-        // 获取该群的所有消息
-        var keys = await redis.keys(`juhkff:auto_reply:${groupId}:*`);
-        keys.sort((a, b) => {
-            const timeA = parseInt(a.split(":")[3]);
-            const timeB = parseInt(b.split(":")[3]);
-            return timeB - timeA; // 按时间戳降序排序
+            type: 'text',
+            sendTime: new Date(sendTime),
         });
-        // 如果超出限制，删除旧消息
-        if (keys.length > maxHistory) {
-            const keysToDelete = keys.slice(maxHistory);
-            for (const key of keysToDelete) {
-                await redis.del(key);
+        // 清理旧消息
+        const count = await ChatHistory.count({ where: { groupId: String(e.group_id), type: 'text' } });
+        if (count > maxHistory) {
+            const recordsToDelete = await ChatHistory.findAll({
+                where: { groupId: String(e.group_id), type: 'text' },
+                order: [['sendTime', 'ASC']],
+                limit: count - maxHistory,
+                attributes: ['id']
+            });
+            if (recordsToDelete.length > 0) {
+                await ChatHistory.destroy({
+                    where: {
+                        id: recordsToDelete.map(r => r.id)
+                    }
+                });
             }
         }
         return true;
@@ -326,22 +340,16 @@ export async function loadContext(groupId) {
     try {
         const maxHistory = config.autoReply.maxHistoryLength;
         // 获取该群的所有消息
-        const keys = await redis.keys(`juhkff:auto_reply:${groupId}:*`);
-        keys.sort((a, b) => {
-            const timeA = parseInt(a.split(":")[3]);
-            const timeB = parseInt(b.split(":")[3]);
-            return timeA - timeB; // 按时间戳升序排序
+        const records = await ChatHistory.findAll({
+            where: { groupId: String(groupId), type: 'text' },
+            order: [['sendTime', 'ASC']],
         });
         // 只获取最近的N条消息
-        const recentKeys = keys.slice(-maxHistory);
-        const messages = [];
-        for (const key of recentKeys) {
-            const data = await redis.get(key);
-            if (data) {
-                messages.push(JSON.parse(data));
-            }
-        }
-        return messages;
+        const recentRecords = records.slice(-maxHistory);
+        return recentRecords.map(r => ({
+            role: r.role,
+            content: r.content
+        }));
     }
     catch (error) {
         logger.error("[handle]加载上下文失败:", error);

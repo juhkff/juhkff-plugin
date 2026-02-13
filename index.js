@@ -1,4 +1,4 @@
-import fs, { appendFile } from "fs";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -10,10 +10,9 @@ if (!global.segment) {
     global.segment = (await import("oicq")).segment;
 }
 
-let ret = [];
-
 logger.info(logger.yellow("- [JUHKFF-PLUGIN] 正在载入"));
 logger.info(logger.redBright("- [JUHKFF-PLUGIN] 如果插件更新后出现问题，可能是新的配置同步时出现错误，可以尝试删除并重装该插件"));
+
 
 async function getFiles(dir) {
     const dirs = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -34,14 +33,15 @@ const bgProcessFiles = await getFiles(path.join(pluginRoot, "javascript", "bgPro
     files.filter((file) => file.endsWith(".js"))
 );
 
+// 先加载 db
+const dbEntry = path.join(pluginRoot, "javascript", "db", "index.js");
+await import(pathToFileURL(dbEntry).href);
+
+// 加载 apps 和 bgProcess
 const files = [...appFiles, ...bgProcessFiles];
-
-files.forEach((file) => {
-    file = pathToFileURL(file).href;  // 支持 Windows 路径
-    ret.push(import(file));
-});
-
-ret = await Promise.allSettled(ret);
+const ret = await Promise.allSettled(
+    files.map((file) => import(pathToFileURL(file).href))
+);
 
 let apps = {};
 for (let i in files) {

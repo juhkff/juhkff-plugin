@@ -50,6 +50,7 @@ export type Request = {
 export type Role = "user" | "assistant" | "system";
 
 export type SimpleJMsg = {
+    replyId?: number,
     id?: number,
     text?: string,
     data?: string,
@@ -64,8 +65,9 @@ export type HistorySimpleJMsg = {
 };
 
 export type ComplexJMsg = {
-    sourceImg?: string[],
-    sourceText?: string,
+    // sourceImg?: string[],
+    // sourceText?: string,
+    replyId?: number,
     img?: string[],
     text?: string,
     notProcessed?: (SimpleJMsg & { url?: string })[],

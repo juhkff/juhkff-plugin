@@ -1,6 +1,6 @@
 import axios from "axios";
 import { config } from "../../../config/index.js";
-import { HistorySimpleJMsg, ComplexJMsg, HistoryComplexJMsg, Request, RequestBody } from "../../../types/index.js";
+import { ComplexJMsg, HistoryComplexJMsg, Request, RequestBody } from "../../../types/index.js";
 import { ChatKits, ConfigKits, FileType, Objects } from "../../../utils/kits.js";
 import { EMOTION_KEY } from "../../constant.js";
 import { ApiKey, ChatAgent } from "../chatAgent.js";

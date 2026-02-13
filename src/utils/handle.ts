@@ -7,11 +7,11 @@ import { emotionGenerate } from "../bgProcess/jobs.js";
 import { config } from "../config/index.js";
 import { EMOTION_KEY } from "../model/constant.js";
 import { agent } from "../model/map.js";
-import { Role, SimpleJMsg } from "../types/index.js";
-import { formatDateDetail } from "./date.js";
+import { SimpleJMsg } from "../types/index.js";
 import { analyseImage, extractUrlContent } from "./helper.js";
 import { Objects } from "./kits.js";
-import { getSourceMessage } from "./redis.js";
+import { ChatResponse } from "../model/agent/chatAgent.js";
+import { ChatHistory } from "../db/index.js";
 
 /**
  * 由于会生成插件专属消息处理列表j_msg，该方法必须作为消息处理的第一个函数
@@ -51,10 +51,22 @@ export async function parseSourceMessage(e: { j_msg: SimpleJMsg[]; group_id: str
     if (!e.j_msg) return;
     for (let i = 0; i < e.j_msg.length; i++) {
         if (e.j_msg[i].type === "reply") {
-            // 优先从redis中获取引用消息
-            var redis_source = await getSourceMessage(e.group_id, e.j_msg[i].id);
-            if (redis_source != undefined) {
-                var msg = `[回复 ${redis_source}]`;
+            const replyId = e.j_msg[i].id;
+            e.j_msg[i].replyId = replyId;
+        }
+    }
+    return e;
+}
+
+/*
+export async function parseSourceMessage(e: { j_msg: SimpleJMsg[]; group_id: string | number; getReply: (arg0: any) => any; }) {
+    if (!e.j_msg) return;
+    for (let i = 0; i < e.j_msg.length; i++) {
+        if (e.j_msg[i].type === "reply") {
+            // TODO 从 db 中获取引用消息
+            var db_source = await ChatHistory.findOne({ where: { groupId: String(e.group_id), messageId: String(e.j_msg[i].id) } });
+            if (db_source != undefined) {
+                var msg = `[回复 ${db_source}]`;
                 e.j_msg[i] = { text: msg, type: "reply" };
                 continue;
             }
@@ -108,6 +120,7 @@ export async function parseSourceMessage(e: { j_msg: SimpleJMsg[]; group_id: str
     }
     return e;
 }
+*/
 
 /**
  * 确保该方法在parseImage之后执行
@@ -200,15 +213,19 @@ export async function parseUrl(e: { group_id: number, j_msg: SimpleJMsg[]; }) {
                         logger.info(`[URL处理]成功提取URL内容`);
                         // 借助chatApi对提取的内容进行总结
                         var model = config.autoReply.chatModel;
-                        var result = await agent.chat!.chatRequest(
+                        const response = await agent.chat!.chatRequest(
                             e.group_id,
                             model,
-                            "根据从URL抓取的信息，以自然语言简练地总结URL中的主要内容，其中无关信息可以过滤掉",
-                            [{ role: "user", content: extractResult.content }],
-                            false,
+                            "以下是根据从URL抓取的信息，以自然语言简练地总结其中的主要内容，其中无关信息可以过滤掉：" + extractResult.content,
+                            [ChatHistory.build({
+                                role: "user",
+                                content: extractResult.content,
+                            })],
                         );
-                        e.j_msg[i].text = e.j_msg[i].text.replace(url, `<分享URL，URL内容的分析结果——${result}>`);
-                        e.j_msg[i].type = "url2text";
+                        if (response.ok) {
+                            e.j_msg[i].text = e.j_msg[i].text.replace(url, `<分享URL，URL内容的分析结果——${response.data}>`);
+                            e.j_msg[i].type = "url2text";
+                        }
                     }
                 }
             }
@@ -258,20 +275,20 @@ function isSkippedUrl(url: string): boolean {
  * @param {*} currentImages 正文图片数组
  * @returns answer 回复内容
  */
-export async function generateAnswer(e: { group_id: number; sender: { card: string; }; }, msg: string) {
+export async function generateAnswer(e: { group_id: number; sender: { card: string; }; }, msg: string): Promise<ChatResponse> {
     let apiKey = config.autoReply.chatApiKey;
     let model = config.autoReply.chatModel;
     if (!apiKey || apiKey.length == 0) {
         logger.error("[handle]请先设置chatApiKey");
-        return "[handle]请先设置chatApiKey";
+        return { ok: false, error: "[handle]请先设置chatApiKey" };
     }
     if (!model || model == "") {
         logger.error("[handle]请先设置chatModel");
-        return "[handle]请先设置chatModel";
+        return { ok: false, error: "[handle]请先设置chatModel" };
     }
 
     // 获取历史对话
-    let historyMessages: { role: Role, content: string }[] = [];
+    let historyMessages: ChatHistory[] = [];
     if (config.autoReply.useContext) {
         historyMessages = await loadContext(e.group_id);
         logger.info(`[handle]加载历史对话: ${historyMessages.length} 条`);
@@ -279,18 +296,18 @@ export async function generateAnswer(e: { group_id: number; sender: { card: stri
 
     // 如果启用了情感，并且redis中不存在情感，则进行情感生成
     if (config.autoReply.useEmotion && Objects.isNull(await redis.get(EMOTION_KEY))) {
-        redis.set(EMOTION_KEY, await emotionGenerate(), { EX: 24 * 60 * 60 });
+        const emotion = await emotionGenerate();
+        if (emotion.ok) {
+            redis.set(EMOTION_KEY, emotion.data, { EX: 24 * 60 * 60 });
+        }
     }
 
-    let answer = await sendChatRequest(
-        e.group_id,
-        e.sender.card + "：" + msg,
-        model,
-        historyMessages
-    );
-    // 使用正则表达式去掉字符串 answer 头尾的换行符
-    answer = answer.replace(/^\n+|\n+$/g, "");
-    return answer;
+    const response = await sendChatRequest(e.group_id, msg, model, historyMessages);
+    if (response.ok) {
+        // 使用正则表达式去掉字符串 content 头尾的换行符
+        response.data = response.data?.replace(/^\n+|\n+$/g, "");
+    }
+    return response;
 }
 
 
@@ -302,39 +319,47 @@ export async function generateAnswer(e: { group_id: number; sender: { card: stri
  * @param useSystemRole 是否使用system预设
  * @returns 
  */
-export async function sendChatRequest(groupId: number, input: string, model = "", historyMessages: { role: Role, content: string }[] = [], useSystemRole = true) {
-    if (!agent.chat) return "[handle]请设置有效的AI接口";
-    var result = await agent.chat.chatRequest(groupId, model, input, historyMessages, useSystemRole);
-    return result;
+export async function sendChatRequest(groupId: number, input: string, model = "", historyMessages: ChatHistory[] = [], useSystemRole = true): Promise<ChatResponse> {
+    if (!agent.chat) return { ok: false, error: "[handle]请设置有效的AI接口" };
+    const response = await agent.chat.chatRequest(groupId, model, input, historyMessages, useSystemRole);
+    return response;
 }
 
 // 保存对话上下文
-export async function saveContext(time: number | string, groupId: number | string, message_id: number | string, role: Role, message: string) {
+export async function saveContext(sendTime: number, e: E, role: "user" | "assistant", message: string) {
     try {
         const maxHistory = config.autoReply.maxHistoryLength;
-        const key = `juhkff:auto_reply:${groupId}:${time}`;
+        const j_msg = e.j_msg as SimpleJMsg;
 
-        // message_id = 0时，表示是AI回复
-        var saveContent = {
-            message_id: message_id,
+        // 保存新消息
+        await ChatHistory.create({
+            groupId: String(e.group_id),
+            messageId: role === "assistant" ? null : e.message_id,
+            replyId: j_msg.replyId ?? null,
             role: role,
+            userId: role === "assistant" ? null : String(e.user_id),
+            nickName: role === "assistant" ? null : e.sender.card,
             content: message,
-        };
-        await redis.set(key, JSON.stringify(saveContent), { EX: 12 * 60 * 60 }); // 12小时过期
-
-        // 获取该群的所有消息
-        var keys = await redis.keys(`juhkff:auto_reply:${groupId}:*`);
-        keys.sort((a: string, b: string) => {
-            const timeA = parseInt(a.split(":")[3]);
-            const timeB = parseInt(b.split(":")[3]);
-            return timeB - timeA; // 按时间戳降序排序
+            extra: null,
+            sendTime: new Date(sendTime),
         });
 
-        // 如果超出限制，删除旧消息
-        if (keys.length > maxHistory) {
-            const keysToDelete = keys.slice(maxHistory);
-            for (const key of keysToDelete) {
-                await redis.del(key);
+        // 清理旧消息
+        const count = await ChatHistory.count({ where: { groupId: String(e.group_id) } });
+        if (count > maxHistory) {
+            const recordsToDelete = await ChatHistory.findAll({
+                where: { groupId: String(e.group_id) },
+                order: [['sendTime', 'ASC']],
+                limit: count - maxHistory,
+                attributes: ['id']
+            });
+
+            if (recordsToDelete.length > 0) {
+                await ChatHistory.destroy({
+                    where: {
+                        id: recordsToDelete.map(r => r.id)
+                    }
+                });
             }
         }
 
@@ -346,30 +371,19 @@ export async function saveContext(time: number | string, groupId: number | strin
 }
 
 // 加载群历史对话
-export async function loadContext(groupId: number | string) {
+export async function loadContext(groupId: number | string): Promise<ChatHistory[]> {
     try {
         const maxHistory = config.autoReply.maxHistoryLength;
 
-        // 获取该群的所有消息
-        const keys = await redis.keys(`juhkff:auto_reply:${groupId}:*`);
-        keys.sort((a: string, b: string) => {
-            const timeA = parseInt(a.split(":")[3]);
-            const timeB = parseInt(b.split(":")[3]);
-            return timeA - timeB; // 按时间戳升序排序
+        // 获取该群最近的N条消息
+        const records = await ChatHistory.findAll({
+            where: { groupId: String(groupId) },
+            order: [['sendTime', 'DESC']],
+            limit: maxHistory,
         });
 
-        // 只获取最近的N条消息
-        const recentKeys = keys.slice(-maxHistory);
-        const messages = [];
-
-        for (const key of recentKeys) {
-            const data = await redis.get(key);
-            if (data) {
-                messages.push(JSON.parse(data));
-            }
-        }
-
-        return messages;
+        // 反转为时间升序
+        return records.reverse();
     } catch (error) {
         logger.error("[handle]加载上下文失败:", error);
         return [];

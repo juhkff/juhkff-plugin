@@ -60,14 +60,15 @@ export async function autoSaveDailyReport() {
 
 export async function emotionGenerate() {
     let model = config.autoReply.chatModel;
-    var emotion = await sendChatRequest(null, config.autoReply.emotionGeneratePrompt, model, [], false);
+    const emotion = await sendChatRequest(null, config.autoReply.emotionGeneratePrompt, model, [], false);
     logger.info(`[JUHKFF-PLUGIN] 情感生成: ${emotion}`);
     return emotion;
 }
 
 export async function autoSaveEmotion() {
     const emotion = await emotionGenerate();
-    redis.set(EMOTION_KEY, emotion, { EX: 24 * 60 * 60 });
+    if (!emotion.ok) return;
+    redis.set(EMOTION_KEY, emotion.data, { EX: 24 * 60 * 60 });
 }
 
 

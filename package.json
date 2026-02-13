@@ -12,6 +12,8 @@
     "tsc": "npm run clean && tsc"
   },
   "dependencies": {
+    "sequelize": "^6.37.7",
+    "sqlite3": "^5.1.7",
     "@volcengine/openapi": "^1.29.0",
     "async-mutex": "^0.5.0",
     "axios": "^1.6.2",

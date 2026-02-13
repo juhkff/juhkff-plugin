@@ -40,13 +40,22 @@ const PLUGIN_DEFAULT_CONFIG_DIR: string = path.join(PLUGIN_ROOT_DIR, "config", "
 const PLUGIN_DATA_DIR: string = path.join(PLUGIN_ROOT_DIR, "data");
 
 /**
+ * 插件本地 SQLite 数据库路径
+ */
+const DB_PATH: string = path.join(PLUGIN_DATA_DIR, "juhkff.db");
+
+/**
  * Pixiv 初始化文件锁路径
  */
 const PIXIV_INIT_LOCK_PATH: string = path.join(PLUGIN_DATA_DIR, "pixiv.init.lock");
-if (!fs.existsSync(path.dirname(PIXIV_INIT_LOCK_PATH))) {
+
+// 确保数据目录存在
+if (!fs.existsSync(PLUGIN_DATA_DIR))
+    fs.mkdirSync(PLUGIN_DATA_DIR, { recursive: true });
+if (!fs.existsSync(path.dirname(PIXIV_INIT_LOCK_PATH)))
     fs.mkdirSync(path.dirname(PIXIV_INIT_LOCK_PATH), { recursive: true });
-}
-if (!fs.existsSync(PIXIV_INIT_LOCK_PATH)) fs.closeSync(fs.openSync(PIXIV_INIT_LOCK_PATH, 'w')); // 创建空文件占位
+if (!fs.existsSync(PIXIV_INIT_LOCK_PATH))
+    fs.closeSync(fs.openSync(PIXIV_INIT_LOCK_PATH, 'w')); // 创建空文件占位
 
 
 export {
@@ -58,4 +67,5 @@ export {
     PLUGIN_DEFAULT_CONFIG_DIR,
     PLUGIN_DATA_DIR,
     PIXIV_INIT_LOCK_PATH,
+    DB_PATH,
 };
